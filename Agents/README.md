@@ -1,5 +1,13 @@
 This library interfaces the OpenAI GPT models
 
+### Setup
+
+Obtain an access key from either:
+
+`https://platform.openai.com/api-keys`
+
+`https://platform.claude.com/settings/keys`
+
 ### Example
 
 ```powershell
