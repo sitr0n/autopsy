@@ -20,10 +20,7 @@ Write-Host "Terminal: $((Get-Command powershell.exe).FileVersionInfo.FileVersion
 
 # Import PowerShell modules recursively
 function Load {
-    [CmdletBinding()]
-    param(
-        [string]$directory = $pwd
-    )
+    param( [string]$directory = $pwd )
 
     if (-not (Test-Path -LiteralPath $directory)) {
         throw "Path '$directory' does not exist"
@@ -66,6 +63,14 @@ function Restart {
 
     Clear-Host
     Open-Session $PSCommandPath
+}
+
+
+
+
+function Paste {
+    
+    $assistant.Message("user", (Get-Clipboard)) | Out-Null
 }
 
 
