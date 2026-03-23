@@ -1,112 +1,36 @@
-# A chatting agent that interfaces with the Anthropic Messages API
-class Claude {
+using module .\ChatAgent.psm1
 
-    # Set the access credentials and a model choice
-    Claude ([string]$model, [string]$token) {
-        $this.model = $model # claude-opus-4-6
+
+# A chatting agent that interacts with the Anthropic Messages API
+class Claude : ChatAgent
+{
+    # Construct a Claude model interaction object
+    Claude([string]$model, [string]$token)
+        : base($model, "https://api.anthropic.com/v1/messages")
+    {
         $this.headers = @{
             "x-api-key"         = $token
             "anthropic-version" = "2023-06-01"
         }
-    }
-
-
-
-    # Set a rule for the chat session
-    [void]Rule ([string]$command) {
-        if ($this.Contains($command)) {
-            return
-        }
-        $this.Message("system", $command) | Out-Null
-    }
-
-
-    # Add a file to the conversation context
-    [void]File ([string]$path) {
-        if ($this.Contains($path)) {
-            return
-        }
-        $this.Rule("Code blocks shall be prepended with a file path and a new line if they have one")
-        $this.Message("user", $this.MarkDown($path)) | Out-Null
-    }
-
-
-    # Ask the model for a reply
-    [string]Say ([string]$message) {
-        $this.Message("user", $message)
-        return $this.Invoke(100)
-    }
-
-
-    # Parse the filesystem path into a message string
-    [string]MarkDown ([string]$path) {
-
-        # Ensure the file exists
-        if (-not (Test-Path $path -PathType Leaf)) {
-            throw "File not found: $path"
-        }
-
-        # Read file content
-        $content = Get-Content -Raw -Path $path
-
-        # Format the output string
-        return "$path`n```````n$content`n``````"
-    }
-
-
-    # Post the conversation to the API
-    [string]Invoke ([int]$MaxTokens) {
-
-        # Set context for the chat completion
-        $body = @{
-            model      = $this.model
+        $this.options = @{
             max_tokens = 1000
-            messages   = $this.messages
-        } | ConvertTo-Json -Depth 12
-
-        # Write model reply to disk
-        $cache = [IO.Path]::GetTempFileName()
-        try {
-            Invoke-WebRequest $this.endpoint -Method Post -OutFile $cache `
-                -Headers $this.headers `
-                -ContentType 'application/json; charset=utf-8' `
-                -Body $body
-
-            # Convert the json text
-            $text = [Text.Encoding]::UTF8.GetString([IO.File]::ReadAllBytes($cache))
-            $obj  = $text | ConvertFrom-Json
-
-            # Extract the reply from the model response
-            $reply = [string]$obj.content[0].text
-            return $this.Message("assistant", $reply)
-
-        # Clean up the file writing
-        } finally {
-            Remove-Item -LiteralPath $cache -ErrorAction SilentlyContinue
         }
     }
 
+    # Ask the CLaude model for a reply
+    [string] Say([string]$prompt)
+    {
+        # Attach the prompt to the chat context
+        $this.Message("user", $prompt) | Out-Null
 
-    # Register a message to the session context
-    [string]Message ([string]$role, [string]$content) {
+        # Query a chat completion from the Anthropic server
+        $response = $this.Invoke($this.options)
+        $reply = [string]$response.content[0].text
 
-        # Append a 'who/what' pair to the conversation
-        $this.messages.Add(@{
-            role    = $role
-            content = $content
-        }) | Out-Null
-        return $content
+        # Attach the reply to the chat context
+        return $this.Message("assistant", $reply)
     }
 
-
-    # Check for duplicate chat context
-    [bool]Contains ([string]$content ) {
-        return ($this.messages | Where-Object { $_.content -eq $content }).Count -gt 0
-    }
-
-
-    [string]$model
-    [hashtable]$headers
-    [System.Collections.ArrayList]$messages = @()
-    [string]$endpoint = "https://api.anthropic.com/v1/messages"
+    [hashtable] $options
 }
+

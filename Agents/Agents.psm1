@@ -3,10 +3,11 @@ using module .\GPT.psm1
 using module .\Image.psm1
 
 
-# Agent factory function
+# Chat agent factory
 function New-Agent {
     param (
-      [string] $model = "gpt-5.4" #"claude-opus-4-6"
+      [Parameter(Mandatory = $true)]
+      [string] $model
     )
 
     if ($model -like 'claude-*') {
@@ -22,14 +23,14 @@ function New-Agent {
 Export-ModuleMember -Function New-Agent
 
 
-# Generate an image based on a prompt
+# Generate an image from a description
 function New-Image {
     param (
       [string] $prompt
     )
 
     $generator = [Image]::new("gpt-image-1", ( Get-Credentials "gpt" ))
-    $generator.Generate($prompt, "./output.png")
+    $generator.Generate($prompt, ".\output.png")
 }
 Export-ModuleMember -Function New-Image
 

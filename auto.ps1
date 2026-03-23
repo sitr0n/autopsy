@@ -53,7 +53,7 @@ function Install {
 
 
 # Assign an assistant
-try { if ((Config "agent") -ne "off") { $assistant = New-Agent }
+try { if ((Config "agent") -ne "off") { $assistant = New-Agent (Config "agent")}
 
 } catch { Warn "No assistant available: $_" }
 
@@ -135,13 +135,13 @@ function Agent {
 
     if ($choice -eq "") {
         $current = Config "agent"
-        $choices = @("on", "off")
+        $choices = @("off", "claude-opus-4-6", "gpt-5.4")
         $choice = Prompt-Selection $choices $current
     }
 
     Config "agent" $choice
-    if ($choice -eq "on") {
-        $assistant = New-Agent
+    if ($choice -ne "off") {
+        $assistant = New-Agent $choice
     }
 }
 
