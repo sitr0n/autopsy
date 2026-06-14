@@ -35,33 +35,39 @@ class ChatAgent
     }
 
 
-    # Post the conversation to the API
-    [psobject] Invoke([hashtable]$options)
-    {
-        $body = @{
-            model     = $this.model
-            messages  = $this.messages
-        }
-
-        foreach ($key in $options.Keys) {
-            $body[$key] = $options[$key]
-        }
-
-        $body = $body | ConvertTo-Json -Depth 12
-
-        # Write model reply to disk
-        $cache = [IO.Path]::GetTempFileName()
-        try { Invoke-WebRequest $this.endpoint -Method Post -OutFile $cache `
-                -Headers $this.headers `
-                -ContentType 'application/json; charset=utf-8' `
-                -Body $body
-
-            # Convert the json text
-            return [Text.Encoding]::UTF8.GetString([IO.File]::ReadAllBytes($cache)) | ConvertFrom-Json
-
-        # Clean up the file writing
-        } finally { Remove-Item -LiteralPath $cache -ErrorAction SilentlyContinue }
+# Post the conversation to the API
+[psobject] Invoke([hashtable]$options)
+{
+    $body = @{
+        model    = $this.model
+        messages = $this.messages
     }
+
+    foreach ($key in $options.Keys) {
+        $body[$key] = $options[$key]
+    }
+
+    $json = $body | ConvertTo-Json -Depth 12
+
+    try {
+        return Invoke-RestMethod `
+            -Uri $this.endpoint `
+            -Method Post `
+            -Headers $this.headers `
+            -ContentType 'application/json; charset=utf-8' `
+            -Body $json `
+            -ErrorAction Stop
+    }
+    catch {
+        $message = $_.Exception.Message
+
+        if ($_.ErrorDetails.Message) {
+            $message = $_.ErrorDetails.Message
+        }
+
+        throw "OpenAI API request failed: $message"
+    }
+}
 
     
     # Register a message to the session context

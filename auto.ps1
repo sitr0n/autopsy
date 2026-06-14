@@ -1,3 +1,6 @@
+#[CmdletBinding()]
+#param([System.Management.Automation.ActionPreference]$DebugPreference = 'SilentlyContinue')
+
 try {
     # Prefer UTF-8 in all hosts
     [Console]::InputEncoding  = [System.Text.UTF8Encoding]::new($false)
@@ -14,34 +17,40 @@ try {
     # Non-fatal: continue with best effort
 }
 
-Write-Host "Core: $($PSVersionTable.PSVersion)"
-Write-Host "Terminal: $((Get-Command powershell.exe).FileVersionInfo.FileVersion)"
+
+
+Write-Debug "Core: $($PSVersionTable.PSVersion)"
+Write-Debug "Terminal: $((Get-Command powershell.exe).FileVersionInfo.FileVersion)"
 
 
 # Import PowerShell modules recursively
-function Load {
-    param( [string]$directory = $pwd )
-
+function Load([string]$directory = $pwd, [switch]$strict)
+{
     if (-not (Test-Path -LiteralPath $directory)) {
         throw "Path '$directory' does not exist"
     }
 
-    # Loop over all files
-    Get-ChildItem -Path $directory -Recurse -File | ForEach-Object {
+    # For all module files under the working directory
+    Get-ChildItem -Path $directory -Recurse -File -Filter "*.psm1" | ForEach-Object {
 
-        # Import module files
-        if ($_.Extension -eq ".psm1") {
-            Import-Module $_.FullName -Force -DisableNameChecking
+        $proper = [string]::Equals($_.BaseName, $_.Directory.Name, [System.StringComparison]::OrdinalIgnoreCase)
+        if ($strict -and -not $proper) {
+
+            Write-Debug "Skipping $($_.FullName)"
+            return
         }
+
+        Write-Debug "Loading $($_.FullName)"
+        Import-Module $_.FullName -Force -DisableNameChecking
     }
 }
 # Import local libraries
-Load $PSScriptRoot
+Load $PSScriptRoot -Strict
 
 
 # Make this script available in the Windows Explorer context menu
-function Install {
-
+function Install
+{
     # Modifying the Windows Registry requires admin privileges
     if (Test-IsElevated) { New-ContextScript $PSCommandPath 'Autopsy' -Icon "209"
 
@@ -59,25 +68,23 @@ try { if ((Config "agent") -ne "off") { $assistant = New-Agent (Config "agent")}
 
 
 # Clear window and chat history
-function Restart {
-
+function Restart
+{
     Clear-Host
     Open-Session $PSCommandPath
 }
 
 
-
-
-function Paste {
-    
-    $assistant.Message("user", (Get-Clipboard)) | Out-Null
+# Dump your clipboard to the model context
+function Paste
+{
+    Write-Debug $assistant.Message("user", (Get-Clipboard))
 }
 
 
-# Display the available functions of the module
-function Help {
-    param( [string] $library = $PSCommandPath )
-
+# Display the available functions of a module
+function Help([string] $library = $PSCommandPath)
+{
     try { # opening the script file
         if ([IO.Path]::IsPathRooted($library)) {
             Show-Functions $library
@@ -127,22 +134,20 @@ function Add {
 }
 
 
-# Switch assistant on/off
-function Agent {
-    param(
-        [string] $choice = ""
-    )
-
+# Select the current model
+function Agent([string] $choice = "")
+{
     if ($choice -eq "") {
         $current = Config "agent"
-        $choices = @("off", "claude-opus-4-6", "gpt-5.4")
-        $choice = Prompt-Selection $choices $current
+        $choice = Prompt-Selection $(List-Models) $current
     }
 
     Config "agent" $choice
     if ($choice -ne "off") {
         $assistant = New-Agent $choice
     }
+    
+    Open-Session $PSCommandPath
 }
 
 

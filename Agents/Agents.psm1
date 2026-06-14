@@ -3,6 +3,18 @@ using module .\GPT.psm1
 using module .\Image.psm1
 
 
+# Get a list of all the models that has an implementation
+function List-Models
+{
+    return @(
+        "off",
+        "claude-opus-4-8",
+        "gpt-5.5"
+    )
+}
+Export-ModuleMember -Function List-Models
+
+
 # Chat agent factory
 function New-Agent {
     param (
