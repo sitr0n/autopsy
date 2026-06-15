@@ -102,34 +102,39 @@ function Help([string] $library = $PSCommandPath)
 
 # Introduce a file to the chat assistants context
 function Add {
-    [CmdletBinding()]
     param(
-        [Parameter(ValueFromRemainingArguments = $true)]
-        [string[]] $Text
+        [Parameter(Mandatory, Position = 0)]
+        [string] $Keyword
     )
 
-    $extension = ""
-    if ($Text.Count -gt 0 -and $Text[0] -eq 'powershell') {
-        $extension = ".ps1"
+    if (-not $global:assistant) {
+        throw "Global variable `$assistant is not set."
     }
 
-    if ($Text[0] -eq 'cpp' -or $Text[0] -eq 'c++') {
-        $extension = "*.cpp,*.hpp"
-    }
+    $imageExtensions = @(".png", ".jpg", ".jpeg", ".webp", ".gif")
 
-
-    if ($extension -eq "") {
-        $begin = 0
-    } else {
-        $begin = 1
-    }
-
-    for ($index = $begin; $index -lt $Text.Count; $index++) {
-        foreach ($file in Get-MatchingFiles (Get-Location) $Text[$index] $extension) {
-
-            Write-Host "$file" -ForegroundColor Yellow
-            $assistant.File($file)
+    $files = Get-ChildItem -Path (Get-Location) -File -Recurse |
+        Where-Object {
+            $_.Name -like "*$Keyword*"
         }
+
+    if (-not $files) {
+        Write-Warning "No files found matching '$Keyword'."
+        return
+    }
+
+    foreach ($file in $files) {
+        $path = $file.FullName
+        $extension = $file.Extension.ToLowerInvariant()
+
+        if ($imageExtensions -contains $extension) {
+            $global:assistant.Image($path, "Image file: $path")
+        }
+        else {
+            $global:assistant.File($path)
+        }
+
+        Write-Host "Added $path"
     }
 }
 
