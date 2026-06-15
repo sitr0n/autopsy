@@ -82,6 +82,13 @@ class ChatAgent
     }
 
 
+    # Register a raw message object to the session context
+    [void] RawMessage([hashtable]$message)
+    {
+        $this.messages.Add($message) | Out-Null
+    }
+
+
     # Check for duplicate chat context
     [bool] Contains([string]$content)
     { 

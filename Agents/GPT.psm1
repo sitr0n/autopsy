@@ -53,35 +53,92 @@ class GPT : ChatAgent
     # Ask the GPT model for a reply
     [string] Say([string]$prompt)
     {
-        # Attach the prompt to the chat context
         $this.Message("user", $prompt) | Out-Null
 
-        # Query a chat completion from the OpenAI server
-        $response = $this.Invoke($this.options)
-
-        if (-not $response.choices -or $response.choices.Count -lt 1) {
-            throw "OpenAI response did not contain any choices."
+        $requestOptions = @{}
+        foreach ($key in $this.options.Keys) {
+            $requestOptions[$key] = $this.options[$key]
         }
 
-        $choice = $response.choices[0]
-        $message = $choice.message
-
-        if ($message.refusal) {
-            throw "OpenAI refused the request: $($message.refusal)"
+        if ($this.tools.Count -gt 0) {
+            $requestOptions["tools"] = $this.tools
+            $requestOptions["tool_choice"] = "auto"
         }
 
-        $reply = [string]$message.content
+        for ($i = 0; $i -lt 8; $i++) {
+            $response = $this.Invoke($requestOptions)
 
-        if ([string]::IsNullOrWhiteSpace($reply)) {
-            throw "OpenAI response did not contain message content. Finish reason: $($choice.finish_reason)"
+            if (-not $response.choices -or $response.choices.Count -lt 1) {
+                throw "OpenAI response did not contain any choices."
+            }
+
+            $choice = $response.choices[0]
+            $message = $choice.message
+
+            if ($message.refusal) {
+                throw "OpenAI refused the request: $($message.refusal)"
+            }
+
+            # If the model wants tools, execute them and continue.
+            if ($message.tool_calls -and $message.tool_calls.Count -gt 0) {
+                $this.RawMessage(@{
+                    role = "assistant"
+                    content = $message.content
+                    tool_calls = $message.tool_calls
+                })
+
+                foreach ($toolCall in $message.tool_calls) {
+                    $toolName = [string]$toolCall.function.name
+                    $argumentsJson = [string]$toolCall.function.arguments
+
+                    Write-Host "Calling $toolName"
+                    Write-Host $argumentsJson
+
+                    if (-not $this.toolHandlers.ContainsKey($toolName)) {
+                        throw "Model requested unknown tool: $toolName"
+                    }
+
+                    $arguments = $null
+                    if (-not [string]::IsNullOrWhiteSpace($argumentsJson)) {
+                        $arguments = $argumentsJson | ConvertFrom-Json
+                    }
+
+                    try {
+                        $result = & $this.toolHandlers[$toolName] $arguments
+                    }
+                    catch {
+                        $result = @{
+                            error = $_.Exception.Message
+                        }
+                    }
+
+                    if ($result -is [string]) {
+                        $toolContent = $result
+                    }
+                    else {
+                        $toolContent = $result | ConvertTo-Json -Depth 12
+                    }
+
+                    $this.RawMessage(@{
+                        role = "tool"
+                        tool_call_id = $toolCall.id
+                        content = $toolContent
+                    })
+                }
+
+                continue
+            }
+
+            $reply = [string]$message.content
+
+            if ([string]::IsNullOrWhiteSpace($reply)) {
+                throw "OpenAI response did not contain message content. Finish reason: $($choice.finish_reason)"
+            }
+
+            return $this.Message("assistant", $reply)
         }
 
-        if ($choice.finish_reason -ne "stop") {
-            Write-Warning "OpenAI finish_reason was '$($choice.finish_reason)'. Reply may be incomplete."
-        }
-
-        # Attach the reply to the chat context
-        return $this.Message("assistant", $reply)
+        throw "Tool call loop exceeded maximum iterations."
     }
 
 
@@ -135,7 +192,31 @@ class GPT : ChatAgent
         }) | Out-Null
     }
 
-    
+    # Register a callable tool
+    [void] Tool(
+        [string]$name,
+        [string]$description,
+        [hashtable]$parameters,
+        [scriptblock]$handler
+    )
+    {
+        if ($this.toolHandlers.ContainsKey($name)) {
+            throw "Tool already registered: $name"
+        }
+
+        $this.tools.Add(@{
+            type = "function"
+            function = @{
+                name = $name
+                description = $description
+                parameters = $parameters
+            }
+        }) | Out-Null
+
+        $this.toolHandlers[$name] = $handler
+    }
 
     [hashtable] $options
+    [System.Collections.ArrayList] $tools = @()
+    [hashtable] $toolHandlers = @{}
 }

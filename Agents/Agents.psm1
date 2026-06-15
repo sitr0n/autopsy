@@ -35,6 +35,46 @@ function New-Agent {
 Export-ModuleMember -Function New-Agent
 
 
+function Test
+{
+    $gpt = [GPT]::new("gpt-5.5", ( Get-Credentials "gpt" ))
+    $gpt.Tool(
+        "get_file_info",
+        "Gets basic information about a local file.",
+        @{
+            type = "object"
+            properties = @{
+                path = @{
+                    type = "string"
+                    description = "The local filesystem path."
+                }
+            }
+            required = @("path")
+        },
+        {
+            param($toolArgs)
+
+            Write-Host "called with $($toolArgs.path)"
+            $item = Get-Item -LiteralPath $toolArgs.path
+
+            return @{
+                path = $item.FullName
+                length = $item.Length
+                lastWriteTime = $item.LastWriteTimeUtc
+            }
+        }
+    )
+
+    try {
+        $gpt.Say("What is the size of C:\code\autopsy\Agents\GPT.psm1?")
+    } catch {
+        Write-Host "Crashed:("
+        Write-Host $_
+    }
+}
+Export-ModuleMember -Function Test
+
+
 # Generate an image from a description
 function New-Image {
     param (
