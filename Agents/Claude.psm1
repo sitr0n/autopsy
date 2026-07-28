@@ -43,59 +43,15 @@ class Claude : ChatAgent
         }
 
         $this.options = @{
-            max_tokens = 1000
+            max_tokens = 10000
         }
     }
 
 
-    # Post the conversation to the Anthropic API
-    [psobject] Invoke([hashtable]$options)
+    # Set a rule for the chat session
+    [void] Rule([string]$command)
     {
-        $messages = [System.Collections.ArrayList]@()
-        $systemMessages = [System.Collections.ArrayList]@()
-
-        foreach ($message in $this.messages) {
-            if ([string]$message.role -eq "system") {
-                $systemMessages.Add([string]$message.content) | Out-Null
-            }
-            else {
-                $messages.Add($message) | Out-Null
-            }
-        }
-
-        $body = @{
-            model    = $this.model
-            messages = $messages
-        }
-
-        if ($systemMessages.Count -gt 0) {
-            $body["system"] = $systemMessages -join "`n`n"
-        }
-
-        foreach ($key in $options.Keys) {
-            $body[$key] = $options[$key]
-        }
-
-        $json = $body | ConvertTo-Json -Depth 20
-
-        try {
-            return Invoke-RestMethod `
-                -Uri $this.endpoint `
-                -Method Post `
-                -Headers $this.headers `
-                -ContentType 'application/json; charset=utf-8' `
-                -Body $json `
-                -ErrorAction Stop
-        }
-        catch {
-            $message = $_.Exception.Message
-
-            if ($_.ErrorDetails.Message) {
-                $message = $_.ErrorDetails.Message
-            }
-
-            throw "Anthropic API request failed: $message"
-        }
+        $this.options["system"] = $command
     }
 
 
@@ -273,9 +229,4 @@ class Claude : ChatAgent
 
         $this.toolHandlers[$name] = $handler
     }
-
-
-    [hashtable] $options
-    [System.Collections.ArrayList] $tools = @()
-    [hashtable] $toolHandlers = @{}
 }

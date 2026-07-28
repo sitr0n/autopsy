@@ -9,10 +9,134 @@ function List-Models
     return @(
         "off",
         "claude-opus-4-8",
-        "gpt-5.5"
+        "claude-fable-5",
+        "gpt-5.5",
+        "gpt-5.6-sol"
     )
 }
 Export-ModuleMember -Function List-Models
+
+
+function Add-ToolsFromModule {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [object] $Agent,
+
+        [Parameter(Mandatory)]
+        [string] $Path
+    )
+
+    $resolvedPath = (Resolve-Path -LiteralPath $Path -ErrorAction Stop).Path
+    $module = @(Import-Module $resolvedPath -Force -PassThru)[-1]
+
+    $commonParameters = @(
+        'Verbose', 'Debug', 'ErrorAction', 'WarningAction',
+        'InformationAction', 'ProgressAction', 'ErrorVariable',
+        'WarningVariable', 'InformationVariable', 'OutVariable',
+        'OutBuffer', 'PipelineVariable', 'WhatIf', 'Confirm'
+    )
+
+    foreach ($command in $module.ExportedFunctions.Values) {
+        $properties = @{}
+        $required = [System.Collections.Generic.List[string]]::new()
+
+        foreach ($parameter in $command.Parameters.Values) {
+            if ($parameter.Name -in $commonParameters) {
+                continue
+            }
+
+            $type = $parameter.ParameterType
+            $property = @{}
+
+            if ($type -eq [bool] -or $type -eq [switch]) {
+                $property.type = 'boolean'
+            }
+            elseif ($type.IsArray) {
+                $property.type = 'array'
+                $property.items = @{ type = 'string' }
+            }
+            elseif ($type -in @([byte], [int16], [int32], [int64])) {
+                $property.type = 'integer'
+            }
+            elseif ($type -in @([single], [double], [decimal])) {
+                $property.type = 'number'
+            }
+            elseif ([System.Collections.IDictionary].IsAssignableFrom($type)) {
+                $property.type = 'object'
+            }
+            else {
+                $property.type = 'string'
+            }
+
+            $parameterAttribute = $parameter.Attributes |
+                Where-Object { $_ -is [Management.Automation.ParameterAttribute] } |
+                Select-Object -First 1
+
+            if ($parameterAttribute.HelpMessage) {
+                $property.description = $parameterAttribute.HelpMessage
+            }
+
+            $validateSet = $parameter.Attributes |
+                Where-Object { $_ -is [Management.Automation.ValidateSetAttribute] } |
+                Select-Object -First 1
+
+            if ($validateSet) {
+                $property.enum = @($validateSet.ValidValues)
+            }
+
+            if ($parameter.Attributes | Where-Object {
+                $_ -is [Management.Automation.ParameterAttribute] -and $_.Mandatory
+            }) {
+                $required.Add($parameter.Name)
+            }
+
+            $properties[$parameter.Name] = $property
+        }
+
+        $schema = @{
+            type       = 'object'
+            properties = $properties
+            required   = @($required)
+        }
+
+        $help = Get-Help "$($module.Name)\$($command.Name)" -ErrorAction SilentlyContinue
+        $description = [string]$help.Synopsis
+
+        if ([string]::IsNullOrWhiteSpace($description)) {
+            $description = "Executes the $($command.Name) PowerShell function."
+        }
+
+        # Capture a separate CommandInfo for each closure.
+        $toolCommand = $command
+        $handler = {
+            param($toolArgs)
+
+            $invokeArgs = @{}
+
+            if ($toolArgs -is [System.Collections.IDictionary]) {
+                foreach ($key in $toolArgs.Keys) {
+                    $invokeArgs[$key] = $toolArgs[$key]
+                }
+            }
+            elseif ($null -ne $toolArgs) {
+                foreach ($property in $toolArgs.PSObject.Properties) {
+                    $invokeArgs[$property.Name] = $property.Value
+                }
+            }
+
+            & $toolCommand @invokeArgs
+        }.GetNewClosure()
+
+        # Claude and OpenAI tool names are safer with underscores.
+        $toolName = $command.Name -replace '-', '_'
+
+        $Agent.Tool($toolName, $description, $schema, $handler)
+    }
+
+    return $Agent
+}
+Export-ModuleMember -Function Add-ToolsFromModule
 
 
 # Chat agent factory
@@ -37,40 +161,13 @@ Export-ModuleMember -Function New-Agent
 
 function Test
 {
+    Write-Host "1"
     $gpt = [GPT]::new("gpt-5.5", ( Get-Credentials "gpt" ))
-    $gpt.Tool(
-        "get_file_info",
-        "Gets basic information about a local file.",
-        @{
-            type = "object"
-            properties = @{
-                path = @{
-                    type = "string"
-                    description = "The local filesystem path."
-                }
-            }
-            required = @("path")
-        },
-        {
-            param($toolArgs)
+    Write-Host "2"
+    Add-ToolsFromModule -Agent $gpt -Path ".\Tools.psm1" | Out-Null
+    Write-Host "3"
 
-            Write-Host "called with $($toolArgs.path)"
-            $item = Get-Item -LiteralPath $toolArgs.path
-
-            return @{
-                path = $item.FullName
-                length = $item.Length
-                lastWriteTime = $item.LastWriteTimeUtc
-            }
-        }
-    )
-
-    try {
-        $gpt.Say("What is the size of C:\code\autopsy\Agents\GPT.psm1?")
-    } catch {
-        Write-Host "Crashed:("
-        Write-Host $_
-    }
+    $gpt.Say('What is the size of C:\code\autopsy\Agents\GPT.psm1?')
 }
 Export-ModuleMember -Function Test
 
@@ -81,8 +178,9 @@ function New-Image {
       [string] $prompt
     )
 
-    $generator = [Image]::new("gpt-image-1", ( Get-Credentials "gpt" ))
-    $generator.Generate($prompt, ".\output.png")
+    $generator = [Image]::new("gpt-image-2", ( Get-Credentials "gpt" ))
+    $file_name = $prompt -replace '\s', '_'
+    $generator.Generate($prompt, "$file_name.png")
 }
 Export-ModuleMember -Function New-Image
 

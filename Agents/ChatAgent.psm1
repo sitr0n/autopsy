@@ -21,7 +21,6 @@ class ChatAgent
     # Parse the filesystem path into a message string
     [string] MarkDown([string]$path)
     {
-
         # Ensure the file exists
         if (-not (Test-Path $path -PathType Leaf)) {
             throw "File not found: $path"
@@ -60,7 +59,9 @@ class ChatAgent
             return [Text.Encoding]::UTF8.GetString([IO.File]::ReadAllBytes($cache)) | ConvertFrom-Json
 
         # Clean up the file writing
-        } finally { Remove-Item -LiteralPath $cache -ErrorAction SilentlyContinue }
+        } finally {
+            Remove-Item -LiteralPath $cache -ErrorAction SilentlyContinue
+        }
     }
 
     
@@ -89,9 +90,12 @@ class ChatAgent
         return ($this.messages | Where-Object { $_.content -eq $content }).Count -gt 0
     }
 
-    
+
     [string]$model
     [string]$endpoint
     [hashtable]$headers
+    [hashtable]$options
     [System.Collections.ArrayList]$messages = @()
+    [System.Collections.ArrayList] $tools = @()
+    [hashtable] $toolHandlers = @{}
 }
