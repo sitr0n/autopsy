@@ -375,62 +375,6 @@ function Read-Input {
 Export-ModuleMember -Function Read-Input
 
 
-function Get-Functions {
-    [CmdletBinding()]
-    param(
-        #[Parameter(Mandatory)]
-        [string] $Path = $PSCommandPath
-    )
-
-    if (-not (Test-Path -LiteralPath $Path)) {
-        throw "Path not found: $Path"
-    }
-
-    $text = Get-Content -LiteralPath $Path -Raw
-
-    # Match optional comment block immediately above a function definition.
-    # Supports:
-    #   <# ... #> (block comment) directly above function
-    #   one or more # line comments directly above function
-    $rx = [regex]::new(
-@"
-(?msx)
-(?: ^ \s* function \s+ (?<name> [A-Za-z_][\w\-]* ) \s* (?:\{| \() )
-|
-(?:
-    (?<comment>
-        ^ \s* <\# .*? \#> \s* \r?\n
-      | (?: ^ \s* \# [^\r\n]* \r?\n )+
-    )
-    \s*
-    ^ \s* function \s+ (?<name2> [A-Za-z_][\w\-]* ) \s* (?:\{| \()
-)
-"@
-    )
-
-    $pairs = foreach ($m in $rx.Matches($text)) {
-        if ($m.Groups['name2'].Success) {
-            [pscustomobject]@{
-                Name    = $m.Groups['name2'].Value
-                Comment = $m.Groups['comment'].Value.TrimEnd()
-            }
-        }
-        elseif ($m.Groups['name'].Success) {
-            [pscustomobject]@{
-                Name    = $m.Groups['name'].Value
-                Comment = $null
-            }
-        }
-    }
-
-    # If you only want ones that *have* an above comment, uncomment:
-    # $pairs | Where-Object { $_.Comment }
-
-    return $pairs
-}
-Export-ModuleMember -Function Get-Functions
-
-
 function Options {
     [CmdletBinding()]
     param(
@@ -485,23 +429,176 @@ function Err {
 Export-ModuleMember -Function Err
 
 
+function Get-Psm1ExportedFunction {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory, ValueFromPipeline, ValueFromPipelineByPropertyName)]
+        [Alias('FullName', 'PSPath')]
+        [string] $Path
+    )
 
+    begin {
+        function Test-UnderFunctionDefinition {
+            param([System.Management.Automation.Language.Ast] $Ast)
 
-# Display function information of a script file
-function Show-Functions {
-    param( [string] $file )
-
-    # Look up information for each function in the script
-    foreach ($function in Get-Functions -Path $file) {
-
-        if ($function.Comment) {
-            Write-Host $function.Comment.Trim() -ForegroundColor DarkGray
+            $p = $Ast.Parent
+            while ($p) {
+                if ($p -is [System.Management.Automation.Language.FunctionDefinitionAst]) {
+                    return $true
+                }
+                $p = $p.Parent
+            }
+            return $false
         }
 
+        function ConvertFrom-CommandArg {
+            param([System.Management.Automation.Language.ExpressionAst] $Ast)
 
+            if ($null -eq $Ast) { return @() }
 
-        Write-Host $function.Name.Trim()
-        Write-Host
+            if ($Ast -is [System.Management.Automation.Language.StringConstantExpressionAst]) {
+                return @($Ast.Value)
+            }
+
+            if ($Ast -is [System.Management.Automation.Language.ExpandableStringExpressionAst] -and
+                $Ast.NestedExpressions.Count -eq 0) {
+                return @($Ast.Value)
+            }
+
+            if ($Ast -is [System.Management.Automation.Language.ArrayLiteralAst]) {
+                return @($Ast.Elements | ForEach-Object { ConvertFrom-CommandArg $_ })
+            }
+
+            return @()
+        }
+
+        function Get-ExportedFunctionPatterns {
+            param([System.Management.Automation.Language.CommandAst[]] $Commands)
+
+            $patterns = [System.Collections.Generic.List[string]]::new()
+
+            foreach ($cmd in $Commands) {
+                $elements = @($cmd.CommandElements)
+                $currentParam = $null
+
+                for ($i = 1; $i -lt $elements.Count; $i++) {
+                    $e = $elements[$i]
+
+                    if ($e -is [System.Management.Automation.Language.CommandParameterAst]) {
+                        if ('Function'.StartsWith($e.ParameterName, [System.StringComparison]::OrdinalIgnoreCase)) {
+                            $currentParam = 'Function'
+
+                            if ($e.Argument) {
+                                foreach ($s in ConvertFrom-CommandArg $e.Argument) {
+                                    [void] $patterns.Add($s)
+                                }
+                            }
+                        }
+                        else {
+                            $currentParam = 'Other'
+                        }
+
+                        continue
+                    }
+
+                    # Positional arguments to Export-ModuleMember bind to -Function.
+                    if ($null -eq $currentParam -or $currentParam -eq 'Function') {
+                        foreach ($s in ConvertFrom-CommandArg $e) {
+                            [void] $patterns.Add($s)
+                        }
+                    }
+                }
+            }
+
+            $patterns.ToArray()
+        }
+    }
+
+    process {
+        $resolvedPath = (Resolve-Path -LiteralPath $Path).ProviderPath
+
+        $tokens = $null
+        $parseErrors = $null
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile(
+            $resolvedPath,
+            [ref] $tokens,
+            [ref] $parseErrors
+        )
+
+        if ($parseErrors) {
+            throw ($parseErrors | ForEach-Object {
+                "$($_.Extent.StartLineNumber):$($_.Extent.StartColumnNumber): $($_.Message)"
+            } | Out-String)
+        }
+
+        $functionAsts = @(
+            $ast.FindAll({
+                param($n)
+                $n -is [System.Management.Automation.Language.FunctionDefinitionAst]
+            }, $true) |
+            Where-Object { -not (Test-UnderFunctionDefinition $_) } |
+            Sort-Object { $_.Extent.StartOffset }
+        )
+
+        # If a function is defined more than once, the last definition wins.
+        $byName = [System.Collections.Generic.Dictionary[
+            string,
+            System.Management.Automation.Language.FunctionDefinitionAst
+        ]]::new([System.StringComparer]::OrdinalIgnoreCase)
+
+        foreach ($f in $functionAsts) {
+            $byName[$f.Name] = $f
+        }
+
+        $effectiveFunctions = @(
+            foreach ($f in $functionAsts) {
+                if ([object]::ReferenceEquals($byName[$f.Name], $f)) {
+                    $f
+                }
+            }
+        )
+
+        $exportCommands = @(
+            $ast.FindAll({
+                param($n)
+
+                if ($n -isnot [System.Management.Automation.Language.CommandAst]) {
+                    return $false
+                }
+
+                $name = $n.GetCommandName()
+                if (-not $name) { return $false }
+
+                (($name -split '\\')[-1]) -eq 'Export-ModuleMember'
+            }, $true) |
+            Where-Object { -not (Test-UnderFunctionDefinition $_) }
+        )
+
+        if ($exportCommands.Count -eq 0) {
+            $exportedFunctions = $effectiveFunctions
+        }
+        else {
+            $patterns = @(Get-ExportedFunctionPatterns $exportCommands)
+
+            $exportedFunctions = @(
+                foreach ($f in $effectiveFunctions) {
+                    foreach ($pattern in $patterns) {
+                        if ($f.Name -like $pattern) {
+                            $f
+                            break
+                        }
+                    }
+                }
+            )
+        }
+
+        foreach ($f in $exportedFunctions) {
+            [pscustomobject]@{
+                Name        = $f.Name
+                ScriptBlock = $f.Body.GetScriptBlock()
+                Path        = $resolvedPath
+            }
+        }
     }
 }
-Export-ModuleMember -Function Show-Functions
+Export-ModuleMember -Function Get-Psm1ExportedFunction

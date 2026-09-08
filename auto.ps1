@@ -62,10 +62,13 @@ function Install
 
 
 # Assign an assistant
-try { if ((Config "agent") -ne "off") { $assistant = New-Agent (Config "agent")}
+try {
+    if ((Config "agent") -ne "off") {
+        $assistant = New-Agent (Config "agent")
 
+        Add-ToolsFromModule -Agent $assistant -Path "$PSScriptRoot\Agents\Tools.psm1" | Out-Null
+    }
 } catch { Warn "No assistant available: $_" }
-
 
 # Clear window and chat history
 function Restart
@@ -81,23 +84,6 @@ function Paste
     Write-Debug $assistant.Message("user", (Get-Clipboard))
 }
 
-
-# Display the available functions of a module
-function Help([string] $library = $PSCommandPath)
-{
-    try { # opening the script file
-        if ([IO.Path]::IsPathRooted($library)) {
-            Show-Functions $library
-
-        } else { # it could be a local module
-            $location = Join-Path (Get-Location) $library
-
-            if (Test-Path $location -PathType Container) {
-                Show-Functions "$location\$library.psm1"
-            }
-        }
-    } catch { Err $_ }
-}
 
 
 # Introduce a file to the chat assistants context
@@ -149,12 +135,16 @@ function Agent([string] $choice = "")
 
     Config "agent" $choice
     if ($choice -ne "off") {
-        $assistant = New-Agent $choice
+        try {
+            $assistant = New-Agent $choice
+
+        } catch {
+            Write-Host "What: $_"
+        }
     }
     
     Open-Session $PSCommandPath
 }
-
 
 
 # Loop over user input

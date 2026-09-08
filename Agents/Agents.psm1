@@ -10,8 +10,10 @@ function List-Models
         "off",
         "claude-opus-4-8",
         "claude-fable-5",
+        "claude-fable-5-1",
         "gpt-5.5",
-        "gpt-5.6-sol"
+        "gpt-5.6-sol",
+        "gpt-6-astra"
     )
 }
 Export-ModuleMember -Function List-Models
@@ -157,19 +159,6 @@ function New-Agent {
     throw "Couldn't find an implementation for the model: $model"
 }
 Export-ModuleMember -Function New-Agent
-
-
-function Test
-{
-    Write-Host "1"
-    $gpt = [GPT]::new("gpt-5.5", ( Get-Credentials "gpt" ))
-    Write-Host "2"
-    Add-ToolsFromModule -Agent $gpt -Path ".\Tools.psm1" | Out-Null
-    Write-Host "3"
-
-    $gpt.Say('What is the size of C:\code\autopsy\Agents\GPT.psm1?')
-}
-Export-ModuleMember -Function Test
 
 
 # Generate an image from a description
