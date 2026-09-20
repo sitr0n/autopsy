@@ -1,5 +1,6 @@
 using module .\Claude.psm1
 using module .\GPT.psm1
+using module .\GPT6.psm1
 using module .\Image.psm1
 
 
@@ -147,6 +148,10 @@ function New-Agent {
       [Parameter(Mandatory = $true)]
       [string] $model
     )
+
+    if ($model -like 'gpt-6-astra') {
+        return [GPT6]::new($model, ( Get-Credentials "gpt" ))
+    }
 
     if ($model -like 'claude-*') {
         return [Claude]::new($model, ( Get-Credentials "claude" ) )
