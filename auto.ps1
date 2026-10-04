@@ -184,11 +184,8 @@ while ($prompt = Ask-User (Split-Path -Leaf $pwd)) {
 
     # or ask the assistant
     Write-Host "$($assistant.Model): " -NoNewline -ForegroundColor Blue
-    $reply = $assistant.say($prompt)
 
-    # then display the reply
-    Write-Host $reply -ForegroundColor Cyan
-
-    Write-Host # new line
+    Show-Markdown $assistant.say($prompt)
+    Show-Markdown "___"
 }
 

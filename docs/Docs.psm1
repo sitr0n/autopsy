@@ -1,4 +1,64 @@
 
+
+function Run-Test {
+<# 
+    .SYNOPSIS
+    Invoke pester
+#>
+    # Pester runs in a child process so that nothing it does on failure
+    # (exit codes, terminating errors, huge error objects) can take down
+    # the calling session. Only plain strings are returned.
+    $testPath = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\Host'))
+
+    $runner = {
+        param([string] $Path)
+        $ErrorActionPreference = 'Continue'
+        try {
+            Import-Module Pester -MinimumVersion 5.0.0 -ErrorAction Stop
+
+            $config = New-PesterConfiguration
+            $config.Run.Path        = $Path
+            $config.Run.PassThru    = $true
+            $config.Run.Exit        = $false
+            $config.Run.Throw       = $false
+            $config.Output.Verbosity = 'None'
+
+            $r = Invoke-Pester -Configuration $config
+
+            "Result: $($r.Result)  Passed: $($r.PassedCount)  Failed: $($r.FailedCount)  Skipped: $($r.SkippedCount)  NotRun: $($r.NotRunCount)"
+
+            foreach ($c in @($r.Containers | Where-Object Result -eq 'Failed')) {
+                foreach ($e in @($c.ErrorRecord)) {
+                    "CONTAINER FAILED: $($c.Item)"
+                    "    $($e.Exception.Message)"
+                }
+            }
+
+            foreach ($t in @($r.Failed)) {
+                "FAILED: $($t.ExpandedPath)"
+                foreach ($e in @($t.ErrorRecord)) {
+                    "    $($e.Exception.Message)"
+                    $where = ($e.ScriptStackTrace -split "`r?`n" | Select-Object -First 1)
+                    if ($where) { "    at $where" }
+                }
+            }
+        } catch {
+            "Test run error: $($_.Exception.Message)"
+        }
+    }
+
+    try {
+        $exe = (Get-Process -Id $PID).Path
+        $output = & $exe -NoProfile -NonInteractive -Command $runner -args $testPath 2>&1
+        $output | ForEach-Object { "$_" }
+        if ($LASTEXITCODE) { "Test process exited with code $LASTEXITCODE" }
+    } catch {
+        "Failed to run tests: $($_.Exception.Message)"
+    }
+}
+Export-ModuleMember -Function Run-Test
+
+
 function Get-Functions {
     [CmdletBinding()]
     param(
@@ -465,7 +525,7 @@ function List-Directory {
         "  ... $omitted more entries not shown (narrow with -Path, -Filter, or a lower -Depth)"
     }
 }
-Export-ModuleMember -Function List-Directory
+Export-ModuleMember -Function List-Directory -Alias ls
 
 
 function Find-Files {
