@@ -17,6 +17,7 @@ function Run-Elevated {
     )
 
     $path = (Resolve-Path $script).Path
+    Write-Debug "Running $path elevated"
 
     Start-Process powershell.exe `
         -Verb RunAs `

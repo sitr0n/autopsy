@@ -10,6 +10,7 @@ function List-Models
     return @(
         "off",
         "claude-opus-4-8",
+        "claude-opus-5-5",
         "claude-fable-5",
         "claude-fable-5-1",
         "gpt-5.5",
@@ -31,7 +32,13 @@ function Add-ToolsFromModule {
     )
 
     $resolvedPath = (Resolve-Path -LiteralPath $Path -ErrorAction Stop).Path
-    $module = @(Import-Module $resolvedPath -Force -PassThru)[-1]
+
+    # Reuse the module if it's already loaded, so the caller keeps access to its functions.
+    # Otherwise import it globally rather than into this module's private session state.
+    $module = Get-Module | Where-Object { $_.Path -eq $resolvedPath } | Select-Object -First 1
+    if (-not $module) {
+        $module = @(Import-Module $resolvedPath -Global -PassThru -DisableNameChecking)[-1]
+    }
 
     $commonParameters = @(
         'Verbose', 'Debug', 'ErrorAction', 'WarningAction',

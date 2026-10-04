@@ -43,7 +43,7 @@ class Claude : ChatAgent
         }
 
         $this.options = @{
-            max_tokens = 10000
+            max_tokens = 128000
         }
     }
 
@@ -85,7 +85,7 @@ class Claude : ChatAgent
                     role    = "assistant"
                     content = $contentBlocks
                 })
-
+                
                 $toolResults = [System.Collections.ArrayList]@()
 
                 foreach ($toolUse in $toolUses) {
@@ -93,7 +93,8 @@ class Claude : ChatAgent
                     $arguments = $toolUse.input
 
                     Write-Host "Calling $toolName"
-                    Write-Host ($arguments | ConvertTo-Json -Depth 12)
+                    Add-Content -Path ".\commands.txt" -Value "Calling $toolName"
+                    Add-Content -Path ".\commands.txt" -Value ($arguments | ConvertTo-Json -Depth 12)
 
                     if (-not $this.toolHandlers.ContainsKey($toolName)) {
                         throw "Model requested unknown tool: $toolName"
@@ -101,6 +102,7 @@ class Claude : ChatAgent
 
                     try {
                         $result = & $this.toolHandlers[$toolName] $arguments
+                        Add-Content -Path ".\commands.txt" -Value $result
                     }
                     catch {
                         $result = @{

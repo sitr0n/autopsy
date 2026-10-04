@@ -48,33 +48,49 @@ function Load([string]$directory = $pwd, [switch]$strict)
 Load $PSScriptRoot -Strict
 
 
-# Make this script available in the Windows Explorer context menu
-function Install
-{
-    # Modifying the Windows Registry requires admin privileges
-    if (Test-IsElevated) { New-ContextScript $PSCommandPath 'Autopsy' -Icon "209"
-
-    } else {
-        Warn "Installation needs to be run as administrator"
-        Run-Elevated $PSCommandPath
-    }
-}
-
-
 # Assign an assistant
 try {
     if ((Config "agent") -ne "off") {
         $assistant = New-Agent (Config "agent")
 
         Add-ToolsFromModule -Agent $assistant -Path "$PSScriptRoot\Agents\Tools.psm1" | Out-Null
+        Add-ToolsFromModule -Agent $assistant -Path "$PSScriptRoot\Host\Host.psm1" | Out-Null
+        Add-ToolsFromModule -Agent $assistant -Path "$PSScriptRoot\Docs\Docs.psm1" | Out-Null
     }
-} catch { Warn "No assistant available: $_" }
+} catch { Write-Warning "No assistant available: $_" }
+
+
+# Add tools from modules named after their parent directory to the assistant
+function Tools([string]$directory = $pwd, [object]$agent = $assistant)
+{
+    if (-not $agent) {
+        throw "No assistant available"
+    }
+
+    if (-not (Test-Path -LiteralPath $directory)) {
+        throw "Path '$directory' does not exist"
+    }
+
+    # For all module files matching their parent directory name
+    Get-ChildItem -Path $directory -Recurse -File -Filter "*.psm1" |
+        Where-Object { [string]::Equals($_.BaseName, $_.Directory.Name, [System.StringComparison]::OrdinalIgnoreCase) } |
+        ForEach-Object {
+            $module = $_.FullName
+            try {
+                Add-ToolsFromModule -Agent $agent -Path $module | Out-Null
+                Write-Host "Added tools from $module"
+
+            } catch { Write-Warning "Failed to add tools from ${module}: $_" }
+        }
+}
+#Tools -Agent $assistant -Path "$PSScriptRoot\Host\Host.psm1" | Out-Null
+
 
 # Clear window and chat history
 function Restart
 {
     Clear-Host
-    Open-Session $PSCommandPath
+    Exit-Session $PSCommandPath
 }
 
 
@@ -130,7 +146,12 @@ function Agent([string] $choice = "")
 {
     if ($choice -eq "") {
         $current = Config "agent"
-        $choice = Prompt-Selection $(List-Models) $current
+        try {
+
+            $choice = Ask-Selection $(List-Models) $current
+        } catch {
+            Write-Host $_
+        }
     }
 
     Config "agent" $choice
@@ -143,12 +164,12 @@ function Agent([string] $choice = "")
         }
     }
     
-    Open-Session $PSCommandPath
+    Exit-Session $PSCommandPath
 }
 
 
 # Loop over user input
-while ($prompt = Read-Input) {
+while ($prompt = Ask-User (Split-Path -Leaf $pwd)) {
 
     # Execute valid language commands
     try { (Invoke-Expression $prompt -ErrorAction Stop | Out-String).TrimEnd()
@@ -166,7 +187,6 @@ while ($prompt = Read-Input) {
     $reply = $assistant.say($prompt)
 
     # then display the reply
-    Play "new_message"
     Write-Host $reply -ForegroundColor Cyan
 
     Write-Host # new line

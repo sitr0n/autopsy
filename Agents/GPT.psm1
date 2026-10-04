@@ -6,6 +6,7 @@ class GPT : ChatAgent
 {
     GPT([string]$model, [string]$token)
         : base($model, "https://api.openai.com/v1/chat/completions")
+        #: base($model, "https://api.openai.com/v1/responses")
     {
         if ([string]::IsNullOrWhiteSpace($model)) {
             throw "Model name cannot be empty."
@@ -46,6 +47,7 @@ class GPT : ChatAgent
         $this.options = @{
             store     = $false
             verbosity = "low"
+            #reasoning_effort = "none"
         }
     }
 
@@ -192,6 +194,7 @@ class GPT : ChatAgent
         }) | Out-Null
     }
 
+
     # Register a callable tool
     [void] Tool(
         [string]$name,
@@ -215,8 +218,4 @@ class GPT : ChatAgent
 
         $this.toolHandlers[$name] = $handler
     }
-
-    [hashtable] $options
-    [System.Collections.ArrayList] $tools = @()
-    [hashtable] $toolHandlers = @{}
 }
